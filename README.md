@@ -12,7 +12,7 @@ pip install -r requirements.txt
 
 ## Data Prep
 
-1. Follow the instructions at [OpenAlex Documentation](https://docs.openalex.org/download-all-data/openalex-snapshot) to download the OpenAlex snapshot.
+1. Follow the instructions in [OpenAlex's Documentation](https://docs.openalex.org/download-all-data/openalex-snapshot) to download the OpenAlex snapshot.
 
 2. Then, use [openalex-fast-field-parse](https://github.com/adambuttrick/openalex-fast-field-parse) to extract the grants field from OpenAlex works into a CSV file. 
 
