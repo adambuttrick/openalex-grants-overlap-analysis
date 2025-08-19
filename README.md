@@ -59,21 +59,33 @@ python reconcile_grants_db.py info --db grants.db
 ## Input File Format
 
 Your input CSV should contain the following columns:
-- `doi`: Digital Object Identifier (lowercase, trimmed)
+- `doi`: Digital Object Identifier (lowercase, trimmed) - optional
 - `award_id`: Grant award identifier (or custom field specified with -a flag)
+
+Note: Records without DOIs are also supported, but are only used to match (vs compare against) existing award IDs assertions.
 
 ## Output Files
 
 The reconciliation process generates four CSV files:
 
 1. `funder_work_and_grant_id_match_in_openalex.csv`: Records where both DOI and grant ID match
+   - Includes `match_type` field (exact, substring, normalized, or fuzzy)
+   - Includes `similarity_score` for matched awards
 2. `funder_work_matched_in_openalex_grant_id_differs.csv`: Records where DOI matches but grant ID differs
+   - Shows both `funder_award_id` and `openalex_award_id` for comparison
+   - Includes `similarity_score` between the differing awards
 3. `funder_grants_not_in_openalex.csv`: Funder grants not found in OpenAlex
 4. `openalex_grants_not_in_funder.csv`: OpenAlex grants not in the input dataset
+   - Includes `has_award_overlap` flag indicating if award ID exists in inpu
+   - Shows `matching_input_award_id` when overlap is found
+   - Includes `match_type` and `similarity_score` for overlapping awards
 
 Additional outputs:
-- `reconciliation_stats_*.txt`: Detailed statistics report
-- `grants_overlap_analysis.xlsx`: Consolidated Excel report (if --excel flag used)
+- `reconciliation_stats_*.txt`: Detailed statistics report including:
+  - Match type breakdown (exact, substring, normalized, fuzzy)
+  - Award overlap analysis for unmatched DOIs
+  - Separate counts for records with and without DOIs
+- `grants_overlap_analysis.xlsx`: Consolidated Excel report with all results and statistics (if --excel flag used)
 
 
 
