@@ -1,6 +1,5 @@
 import re
 import unicodedata
-from typing import Optional, Tuple, List
 from difflib import SequenceMatcher
 
 
@@ -85,7 +84,7 @@ def are_segments_compatible(seg1, seg2):
     return False
 
 
-def structured_match(id1, id2) -> Tuple[bool, float]:
+def structured_match(id1, id2):
     segments1 = extract_segments(id1)
     segments2 = extract_segments(id2)
 
@@ -96,7 +95,6 @@ def structured_match(id1, id2) -> Tuple[bool, float]:
     if abs(len(segments1) - len(segments2)) > 2:
         return False, 0.0
 
-    # Compare segments
     matched_segments = 0
     total_segments = max(len(segments1), len(segments2))
 
@@ -263,28 +261,31 @@ def check_normalized_match(id1, id2):
     return normalize_award_id(id1) == normalize_award_id(id2)
 
 
-def match_award_ids(id1, id2):
+def match_award_ids(id1, id2, match_types = None):
+    if match_types is None:
+        match_types = ['substring', 'normalized', 'fuzzy']
+
     if id1 is None or id2 is None:
         if id1 is None and id2 is None:
-            return (True, 'exact')
-        return (False, None)
+            return True, 'exact'
+        return False, None
 
     id1_str = str(id1).strip()
     id2_str = str(id2).strip()
 
     if id1_str == id2_str:
-        return (True, 'exact')
+        return True, 'exact'
 
-    if check_substring_match(id1_str, id2_str):
-        return (True, 'substring')
+    if 'substring' in match_types and check_substring_match(id1_str, id2_str):
+        return True, 'substring'
 
-    if check_normalized_match(id1_str, id2_str):
-        return (True, 'normalized')
+    if 'normalized' in match_types and check_normalized_match(id1_str, id2_str):
+        return True, 'normalized'
 
-    if is_fuzzy_match(id1_str, id2_str):
-        return (True, 'fuzzy')
+    if 'fuzzy' in match_types and is_fuzzy_match(id1_str, id2_str):
+        return True, 'fuzzy'
 
-    return (False, None)
+    return False, None
 
 
 def get_similarity_score(id1, id2):
@@ -346,11 +347,11 @@ def get_similarity_score(id1, id2):
     return max_score
 
 
-def get_match_type(id1, id2):
-    _, match_type = match_award_ids(id1, id2)
+def get_match_type(id1, id2, match_types = None):
+    _, match_type = match_award_ids(id1, id2, match_types=match_types)
     return match_type
 
 
-def awards_match(id1, id2):
-    match_found, _ = match_award_ids(id1, id2)
+def awards_match(id1, id2, match_types = None):
+    match_found, _ = match_award_ids(id1, id2, match_types=match_types)
     return match_found
