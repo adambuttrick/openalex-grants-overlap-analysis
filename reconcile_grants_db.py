@@ -12,6 +12,14 @@ from grants_db_common import (
     get_top_funders,
     format_statistics_output
 )
+from utils.award_id_matcher import (
+    awards_match,
+    get_match_type,
+    get_similarity_score,
+    normalize_award_id,
+    check_substring_match,
+    check_normalized_match
+)
 
 
 def parse_arguments():
@@ -97,6 +105,13 @@ def create_excel_report(results, input_file, output_dir, stats=None):
                 label = key.replace('_', ' ').title()
                 stats_data.append([label, f'{value:,}'])
             stats_data.append(['', ''])
+            
+            if stats.get('match_type_breakdown'):
+                stats_data.append(['MATCH TYPE BREAKDOWN', ''])
+                for key, value in stats['match_type_breakdown'].items():
+                    label = key.replace('_', ' ').title()
+                    stats_data.append([label, f'{value:,}'])
+                stats_data.append(['', ''])
 
             if stats.get('percentages'):
                 stats_data.append(['PERCENTAGES (of input file)', ''])
@@ -140,6 +155,13 @@ def query_database(db_path, input_file, funder_id, award_field='award_id',
 
         conn.execute("DROP TABLE IF EXISTS input_data")
         conn.execute("CREATE TEMP TABLE input_data AS SELECT * FROM input_df")
+        
+        conn.create_function('awards_match', awards_match, return_type=bool)
+        conn.create_function('get_match_type', get_match_type, return_type=str)
+        conn.create_function('get_similarity_score', get_similarity_score, return_type=float)
+        conn.create_function('normalize_award_id', normalize_award_id, return_type=str)
+        conn.create_function('check_substring_match', check_substring_match, return_type=bool)
+        conn.create_function('check_normalized_match', check_normalized_match, return_type=bool)
 
         funder_stats = get_funder_statistics(conn, funder_id)
 
@@ -153,10 +175,16 @@ def query_database(db_path, input_file, funder_id, award_field='award_id',
         print("\nPerforming reconciliation...")
 
         with_both = conn.execute("""
-            SELECT DISTINCT i.*, g.work_id
+            SELECT DISTINCT 
+                i.*,
+                i.award_id as funder_award_id,
+                g.award_id as openalex_award_id,
+                g.work_id,
+                get_match_type(CAST(i.award_id AS VARCHAR), CAST(g.award_id AS VARCHAR)) as match_type,
+                ROUND(get_similarity_score(CAST(i.award_id AS VARCHAR), CAST(g.award_id AS VARCHAR)), 3) as similarity_score
             FROM input_data i
             INNER JOIN grants g ON i.doi = g.doi 
-                AND CAST(i.award_id AS VARCHAR) = CAST(g.award_id AS VARCHAR)
+                AND awards_match(CAST(i.award_id AS VARCHAR), CAST(g.award_id AS VARCHAR))
                 AND g.funder = ?
         """, [funder_id]).df()
 
@@ -165,12 +193,15 @@ def query_database(db_path, input_file, funder_id, award_field='award_id',
                 i.*,
                 i.award_id as funder_award_id,
                 g.award_id as openalex_award_id,
-                g.work_id
+                g.work_id,
+                CASE 
+                    WHEN i.award_id IS NULL OR g.award_id IS NULL THEN 'missing'
+                    ELSE 'no_match'
+                END as match_type,
+                ROUND(get_similarity_score(CAST(i.award_id AS VARCHAR), CAST(g.award_id AS VARCHAR)), 3) as similarity_score
             FROM input_data i
             INNER JOIN grants g ON i.doi = g.doi AND g.funder = ?
-            WHERE CAST(i.award_id AS VARCHAR) != CAST(g.award_id AS VARCHAR)
-               OR (i.award_id IS NULL AND g.award_id IS NOT NULL)
-               OR (i.award_id IS NOT NULL AND g.award_id IS NULL)
+            WHERE NOT awards_match(CAST(i.award_id AS VARCHAR), CAST(g.award_id AS VARCHAR))
         """, [funder_id]).df()
 
         with_neither = conn.execute("""
@@ -199,6 +230,9 @@ def query_database(db_path, input_file, funder_id, award_field='award_id',
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         input_basename = Path(input_file).stem
+        
+        if 'award_id' in with_both.columns and 'funder_award_id' in with_both.columns:
+            with_both = with_both.drop('award_id', axis=1)
 
         results = {
             'funder_work_and_grant_id_match_in_openalex': with_both,
@@ -281,6 +315,18 @@ def show_database_info(db_path):
 def generate_statistics(conn, input_df, results, funder_id):
     funder_stats = get_funder_statistics(conn, funder_id)
 
+    match_type_breakdown = {}
+    if 'funder_work_and_grant_id_match_in_openalex' in results:
+        df_matched = results['funder_work_and_grant_id_match_in_openalex']
+        if not df_matched.empty and 'match_type' in df_matched.columns:
+            match_type_counts = df_matched['match_type'].value_counts().to_dict()
+            match_type_breakdown = {
+                'exact_matches': match_type_counts.get('exact', 0),
+                'substring_matches': match_type_counts.get('substring', 0),
+                'normalized_matches': match_type_counts.get('normalized', 0),
+                'fuzzy_matches': match_type_counts.get('fuzzy', 0)
+            }
+
     stats = {
         'timestamp': datetime.now().isoformat(),
         'funder_id': funder_id,
@@ -300,6 +346,7 @@ def generate_statistics(conn, input_df, results, funder_id):
             'funder_grants_not_in_openalex': len(results.get('funder_grants_not_in_openalex', [])),
             'openalex_grants_not_in_funder': len(results.get('openalex_grants_not_in_funder', []))
         },
+        'match_type_breakdown': match_type_breakdown,
         'percentages': {}
     }
 
@@ -340,6 +387,11 @@ def print_statistics(stats):
     print("\nReconciliation Results:")
     for key, value in stats['reconciliation_results'].items():
         print(f"  {key}: {value:,}")
+    
+    if stats['match_type_breakdown']:
+        print("\nMatch Type Breakdown (for work and grant ID matches):")
+        for key, value in stats['match_type_breakdown'].items():
+            print(f"  {key}: {value:,}")
 
     if stats['percentages']:
         print("\nPercentages (of input file):")
@@ -372,6 +424,12 @@ def save_statistics(stats, stats_file, input_file):
         for key, value in stats['reconciliation_results'].items():
             f.write(f"  {key}: {value:,}\n")
         f.write("\n")
+        
+        if stats.get('match_type_breakdown'):
+            f.write("Match Type Breakdown (for work and grant ID matches):\n")
+            for key, value in stats['match_type_breakdown'].items():
+                f.write(f"  {key}: {value:,}\n")
+            f.write("\n")
 
         if stats['percentages']:
             f.write("Percentages (of input file):\n")
