@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from typing import Optional, Tuple, List
 from difflib import SequenceMatcher
 
 
@@ -347,11 +348,11 @@ def get_similarity_score(id1, id2):
     return max_score
 
 
-def get_match_type(id1, id2, match_types = None):
+def get_match_type(id1, id2, match_types: Optional[List[str]] = None) -> Optional[str]:
     _, match_type = match_award_ids(id1, id2, match_types=match_types)
     return match_type
 
 
-def awards_match(id1, id2, match_types = None):
+def awards_match(id1, id2, match_types: Optional[List[str]] = None) -> bool:
     match_found, _ = match_award_ids(id1, id2, match_types=match_types)
     return match_found
