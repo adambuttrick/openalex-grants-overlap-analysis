@@ -151,8 +151,12 @@ def create_excel_report(results, input_file, output_dir, stats=None):
 def unified_award_id_matching(oa_grants_df, input_with_doi_df, input_without_doi_df):
     print("Building unified inverted index for award ID matching...")
     
-    oa_awards = oa_grants_df['award_id'].dropna().unique()
+    oa_with_awards = oa_grants_df[oa_grants_df['award_id'].notna()].copy()
+    oa_without_awards = oa_grants_df[oa_grants_df['award_id'].isna()].copy()
+    
+    oa_awards = oa_with_awards['award_id'].unique() if not oa_with_awards.empty else []
     print(f"Processing {len(oa_awards):,} unique OpenAlex awards")
+    print(f"Also including {len(oa_without_awards):,} OpenAlex grants with no award_id (funder-only)")
     
     all_input_awards = []
     
@@ -201,7 +205,11 @@ def unified_award_id_matching(oa_grants_df, input_with_doi_df, input_without_doi
     oa_not_matched_by_doi['matching_input_award_id'] = oa_not_matched_by_doi['award_id'].map(oa_to_input_matches)
     oa_not_matched_by_doi['has_award_overlap'] = oa_not_matched_by_doi['matching_input_award_id'].notna()
     
-    matched_rows = oa_not_matched_by_doi['has_award_overlap']
+    no_award_mask = oa_not_matched_by_doi['award_id'].isna()
+    oa_not_matched_by_doi.loc[no_award_mask, 'has_award_overlap'] = False
+    oa_not_matched_by_doi.loc[no_award_mask, 'has_no_award_id'] = True
+    
+    matched_rows = (oa_not_matched_by_doi['has_award_overlap'] == True)
     if matched_rows.any():
         oa_not_matched_by_doi.loc[matched_rows, 'match_type'] = oa_not_matched_by_doi.loc[matched_rows].apply(
             lambda row: get_match_type(row['award_id'], row['matching_input_award_id']), axis=1
@@ -220,6 +228,8 @@ def unified_award_id_matching(oa_grants_df, input_with_doi_df, input_without_doi
     print(f"Total OpenAlex grants with award overlap: {oa_not_matched_by_doi['has_award_overlap'].sum():,}")
     if overlap_from_no_doi > 0:
         print(f"  (including {overlap_from_no_doi:,} matched via entries without DOIs)")
+    if no_award_mask.sum() > 0:
+        print(f"OpenAlex grants with no award_id (funder-only): {no_award_mask.sum():,}")
     
     return oa_not_matched_by_doi
 
@@ -242,7 +252,9 @@ def query_database(db_path, input_file, funder_id, award_field='award_id',
             input_df.rename(columns={award_field: 'award_id'}, inplace=True)
 
         if 'doi' in input_df.columns:
-            input_df['doi'] = input_df['doi'].str.lower().str.strip()
+            input_df['doi'] = input_df['doi'].astype(str)
+            input_df['doi'] = input_df['doi'].replace('nan', pd.NA)
+            input_df.loc[input_df['doi'].notna(), 'doi'] = input_df.loc[input_df['doi'].notna(), 'doi'].str.lower().str.strip()
             input_df['doi'] = input_df['doi'].replace('', pd.NA)
 
         print(f"Loaded {len(input_df):,} records from input file")
@@ -335,7 +347,6 @@ def query_database(db_path, input_file, funder_id, award_field='award_id',
                 g.award_id
             FROM grants g
             WHERE g.funder = ?
-              AND g.award_id IS NOT NULL
         """, [funder_id]).df()
         
         dois_not_matched_raw = conn.execute("""
