@@ -60,7 +60,7 @@ python reconcile_grants_db.py info --db grants.db
 
 Your input CSV should contain the following columns:
 - `doi`: Digital Object Identifier (lowercase, trimmed) - optional
-- `award_id`: Grant award identifier (or custom field specified with -a flag)
+- `award_id`: Grant award identifier (or custom field specified with `-a` flag)
 
 Note: Records without DOIs are also supported, but are only used to match (vs compare against) existing award IDs assertions.
 
